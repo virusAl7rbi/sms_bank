@@ -1,50 +1,47 @@
-// ignore_for_file: depend_on_referenced_packages
-
 import 'dart:convert';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:awesome_notifications/awesome_notifications.dart';
+import 'package:flutter_notification_listener/flutter_notification_listener.dart';
 import 'package:flutter/material.dart';
-import 'package:telephony/telephony.dart';
 
-void messageHandler(SmsMessage message) {
-  if (message.body.toString().contains("شراء")) {
-  LineSplitter ls = const LineSplitter();
-  List lines = ls.convert(message.body.toString());
-  String price = lines[3].toString().split(":")[1];
+void messageHandler(NotificationEvent message) {
+  if (message.text.toString().contains("شراء")) {
+    LineSplitter ls = const LineSplitter();
+    List lines = ls.convert(message.text.toString());
+    String price = lines[3].toString().split(":")[1];
 
-  //show notification
-  AwesomeNotifications().createNotification(
-      content: NotificationContent(
-          id: 123,
-          channelKey: 'payment_amount',
-          title: 'payment amount',
-          body: price,
-          category: NotificationCategory.Message));
+    //show notification
+    AwesomeNotifications().createNotification(
+        content: NotificationContent(
+            id: 123,
+            channelKey: 'payment_amount',
+            title: 'payment amount',
+            body: price,
+            category: NotificationCategory.Message));
   }
 }
 
+void startListening() async {
+  bool? hasPermission = await NotificationsListener.hasPermission;
+  if (!hasPermission!) {
+    NotificationsListener.openPermissionSettings();
+    return;
+  }
+
+  var isR = await NotificationsListener.isRunning;
+
+  if (!isR!) {
+    await NotificationsListener.startService();
+  }
+}
+
+Future<void> initPlatformState() async {
+  NotificationsListener.initialize(callbackHandle: messageHandler);
+  // register you event handler in the ui logic.
+  NotificationsListener.receivePort!.listen((evt) => messageHandler(evt));
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // set variable
-  final Telephony telephony = Telephony.instance;
-  // check permissions
-  await Permission.notification.isDenied.then((value) {
-    if (value) {
-      Permission.notification.request();
-    }
-  });
-  await Permission.ignoreBatteryOptimizations.isDenied.then((value) {
-    if (value) {
-      Permission.ignoreBatteryOptimizations.request();
-    }
-  });
-  await Permission.sms.isDenied.then((value) {
-    if (value) {
-      Permission.sms.request();
-    }
-  });
-  await telephony.requestPhoneAndSmsPermissions;
   // init notification
   AwesomeNotifications().initialize('resource://drawable/payment', [
     NotificationChannel(
@@ -80,15 +77,12 @@ void main() async {
           autoDismissible: false,
           actionType: ActionType.SilentAction,
           notificationLayout: NotificationLayout.BigText,
-          
           category: NotificationCategory.Service));
 
-
   runApp(const MyApp());
-  // set sms listener
-  telephony.listenIncomingSms(
-      onNewMessage: messageHandler,
-      onBackgroundMessage: messageHandler);
+  // set listener
+  await initPlatformState();
+  startListening();
 }
 
 class MyApp extends StatelessWidget {
