@@ -240,14 +240,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.8.0"
-  notification_listener_service:
-    dependency: "direct main"
-    description:
-      name: notification_listener_service
-      sha256: "11f45e8439e08e6de183cb96fc76a02ffc1d59b43b90993a798020bfa11b40ee"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.3.2"
   package_info_plus:
     dependency: transitive
     description:

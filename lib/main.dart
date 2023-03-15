@@ -1,16 +1,20 @@
-import 'dart:convert';
+
+// ignore_for_file: prefer_const_constructors
+
+import 'package:flutter_notification_listener/flutter_notification_listener.dart';
 import 'package:disable_battery_optimization/disable_battery_optimization.dart';
 import 'package:awesome_notifications/awesome_notifications.dart';
-import 'package:flutter/foundation.dart';
-import 'package:notification_listener_service/notification_event.dart';
-import 'package:notification_listener_service/notification_listener_service.dart';
-import 'package:flutter/material.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'dart:isolate';
+import 'dart:ui';
 
-void messageHandler(ServiceNotificationEvent message) async {
+void messageHandler(NotificationEvent message) async {
   List paymentWord = ['شراء', 'purchase'];
   List amountWord = ['مبلغ', 'amount'];
-  String msg = message.content.toString().toLowerCase();
+  String msg = message.text.toString().toLowerCase();
   bool validate = paymentWord.any((item) => msg.contains(item));
   if (validate) {
     LineSplitter ls = const LineSplitter();
@@ -32,9 +36,9 @@ void messageHandler(ServiceNotificationEvent message) async {
 }
 
 void checkNotificationPermissions() async {
-  bool? hasPermission = await NotificationListenerService.isPermissionGranted();
-  if (!hasPermission) {
-    NotificationListenerService.requestPermission();
+  bool? hasPermission = await NotificationsListener.hasPermission;
+  if (!hasPermission!) {
+    NotificationsListener.openPermissionSettings();
     await AwesomeNotifications().requestPermissionToSendNotifications();
     return;
   }
@@ -49,9 +53,41 @@ disableBatteryOptimization() async {
   }
 }
 
-Future<void> startListen() async {
-  NotificationListenerService.notificationsStream
-      .listen((event) => messageHandler(event));
+Future<void> initPlatformState() async {
+  ReceivePort port = ReceivePort();
+  NotificationsListener.initialize(callbackHandle: _callback);
+
+  // this can fix restart<debug> can't handle error
+  IsolateNameServer.removePortNameMapping("_listener_");
+  IsolateNameServer.registerPortWithName(port.sendPort, "_listener_");
+  port.listen((message) => messageHandler(message));
+
+  // don't use the default receivePort
+  NotificationsListener.receivePort!.listen((evt) => messageHandler(evt));
+
+}
+
+void startListening() async {
+
+  var hasPermission = await NotificationsListener.hasPermission;
+  if (!hasPermission!) {
+    NotificationsListener.openPermissionSettings();
+    return;
+  }
+
+  var isR = await NotificationsListener.isRunning;
+
+  if (!isR!) {
+    await NotificationsListener.startService(
+        foreground: false,
+        title: "Listener Running",
+        description: "Welcome to having me");
+  }
+}
+
+void _callback(NotificationEvent evt) {
+  final SendPort? send = IsolateNameServer.lookupPortByName("_listener_");
+  send?.send(evt);
 }
 
 void main() async {
@@ -106,13 +142,14 @@ void main() async {
         // We recommend adjusting this value in production.
         options.tracesSampleRate = 1.0;
       },
-      appRunner: () => runApp(const MyApp()),
+      appRunner: () => runApp(MyApp()),
     );
   } else {
-    runApp(const MyApp());
+    runApp(MyApp());
   }
   // set listener
-  await startListen();
+  initPlatformState();
+  startListening();
 }
 
 class MyApp extends StatelessWidget {
