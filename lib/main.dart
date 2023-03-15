@@ -1,49 +1,67 @@
 import 'dart:convert';
+import 'package:disable_battery_optimization/disable_battery_optimization.dart';
 import 'package:awesome_notifications/awesome_notifications.dart';
-import 'package:flutter_notification_listener/flutter_notification_listener.dart';
+import 'package:flutter/foundation.dart';
+import 'package:notification_listener_service/notification_event.dart';
+import 'package:notification_listener_service/notification_listener_service.dart';
 import 'package:flutter/material.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 
-void messageHandler(NotificationEvent message) {
-  if (message.text.toString().contains("شراء")) {
+void messageHandler(ServiceNotificationEvent message) async {
+  List paymentWord = ['شراء', 'purchase'];
+  List amountWord = ['مبلغ', 'amount'];
+  String msg = message.content.toString().toLowerCase();
+  bool validate = paymentWord.any((item) => msg.contains(item));
+  if (validate) {
     LineSplitter ls = const LineSplitter();
-    List lines = ls.convert(message.text.toString());
-    String price = lines[3].toString().split(":")[1];
-
-    //show notification
-    AwesomeNotifications().createNotification(
-        content: NotificationContent(
-            id: 123,
-            channelKey: 'payment_amount',
-            title: 'payment amount',
-            body: price,
-            category: NotificationCategory.Message));
+    List lines = ls.convert(msg);
+    for (final i in lines) {
+      if (amountWord.any((item) => i.contains(item))) {
+        String price = i.toString().split(":")[1];
+        //show notification
+        await AwesomeNotifications().createNotification(
+            content: NotificationContent(
+                id: 123,
+                channelKey: 'payment_amount',
+                title: 'payment amount',
+                body: price,
+                category: NotificationCategory.Message));
+      }
+    }
   }
 }
 
-void startListening() async {
-  bool? hasPermission = await NotificationsListener.hasPermission;
-  if (!hasPermission!) {
-    NotificationsListener.openPermissionSettings();
+void checkNotificationPermissions() async {
+  bool? hasPermission = await NotificationListenerService.isPermissionGranted();
+  if (!hasPermission) {
+    NotificationListenerService.requestPermission();
+    await AwesomeNotifications().requestPermissionToSendNotifications();
     return;
   }
+}
 
-  var isR = await NotificationsListener.isRunning;
+disableBatteryOptimization() async {
+  bool? isBatteryOptimizationDisabled =
+      await DisableBatteryOptimization.isBatteryOptimizationDisabled;
 
-  if (!isR!) {
-    await NotificationsListener.startService();
+  if (!isBatteryOptimizationDisabled!) {
+    await DisableBatteryOptimization.showDisableBatteryOptimizationSettings();
   }
 }
 
-Future<void> initPlatformState() async {
-  NotificationsListener.initialize(callbackHandle: messageHandler);
-  // register you event handler in the ui logic.
-  NotificationsListener.receivePort!.listen((evt) => messageHandler(evt));
+Future<void> startListen() async {
+  NotificationListenerService.notificationsStream
+      .listen((event) => messageHandler(event));
 }
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  checkNotificationPermissions();
+  // disable battery optimization to keep app running
+  await disableBatteryOptimization();
   // init notification
-  AwesomeNotifications().initialize('resource://drawable/payment', [
+  AwesomeNotifications().initialize("resource://drawable/payment", [
     NotificationChannel(
       channelGroupKey: 'payment_amount',
       channelKey: 'payment_amount',
@@ -54,7 +72,7 @@ void main() async {
       enableVibration: true,
     ),
   ]);
-  AwesomeNotifications().initialize('resource://drawable/payment', [
+  AwesomeNotifications().initialize("resource://drawable/payment", [
     NotificationChannel(
         channelGroupKey: 'payment_amount',
         channelKey: 'payment_amount_keep_background',
@@ -79,10 +97,22 @@ void main() async {
           notificationLayout: NotificationLayout.BigText,
           category: NotificationCategory.Service));
 
-  runApp(const MyApp());
+  if (!kDebugMode) {
+    await SentryFlutter.init(
+      (options) {
+        options.dsn =
+            'https://575b700d4c364b49aad36daf0fe6f6c6@o4504306813960192.ingest.sentry.io/4504837853741056';
+        // Set tracesSampleRate to 1.0 to capture 100% of transactions for performance monitoring.
+        // We recommend adjusting this value in production.
+        options.tracesSampleRate = 1.0;
+      },
+      appRunner: () => runApp(const MyApp()),
+    );
+  } else {
+    runApp(const MyApp());
+  }
   // set listener
-  await initPlatformState();
-  startListening();
+  await startListen();
 }
 
 class MyApp extends StatelessWidget {
@@ -90,13 +120,20 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
-      home: Scaffold(
-        body: Center(
-          child: Text(
-            "This app will show notification on any payment sms with the amount,\n\n\t no need to open the app to receive the notification",
-            style: TextStyle(fontSize: 25),
-            textAlign: TextAlign.center,
+    return MaterialApp(
+      home: SafeArea(
+        child: Scaffold(
+          appBar: AppBar(
+            centerTitle: true,
+            backgroundColor: const Color.fromRGBO(128, 180, 251, 1),
+            title: const Text("Payment amount"),
+          ),
+          body: const Center(
+            child: Text(
+              "This app will show notification on any payment sms with the amount,\n\n\t no need to open the app to receive the notification",
+              style: TextStyle(fontSize: 25),
+              textAlign: TextAlign.center,
+            ),
           ),
         ),
       ),
